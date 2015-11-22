@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+
+   <extension
+         point="org.eclipse.ui.commands">
+      <category
+            id="mist.classgen.commands.generateCategory"
+            name="Generate">
+      </category>
+      <command
+            categoryId="mist.classgen.commands.generateCategory"
+            defaultHandler="mist.classgen.commands.GenerateATLHandler"
+            id="mist.classgen.commands.generateATL"
+            name="Generate ATL">
+      </command>
+   </extension>
+   <extension
+         point="org.eclipse.ui.menus">
+      <menuContribution
+            allPopups="false"
+            locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+         <menu
+               label="Generate">
+            <command
+                  commandId="mist.classgen.commands.generateATL"
+                  style="push">
+                  <visibleWhen>
+			       <with variable="activeMenuSelection">
+			        <iterate
+			             ifEmpty="false">
+			         <adapt type="org.eclipse.core.resources.IResource">
+			           <test property="org.eclipse.core.resources.name" value="*.mt" />
+			         </adapt>
+			        </iterate>
+			       </with>
+			     </visibleWhen>
+            </command>
+         </menu>
+      </menuContribution>
+   </extension>
+
+</plugin>
