@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<rm:Database xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:rm="http://rdbms/1.0" name="FacultySystem">
+  <tables name="Student">
+    <tablePK name="PK_Student" PKandUQColumns="//@tables.0/@columns.3 //@tables.0/@columns.2 //@tables.0/@columns.1"/>
+    <columns name="studentName" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="studentSurname" columnInPKandUQ="//@tables.0/@tablePK" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="studentID" columnInPKandUQ="//@tables.0/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="studentYear" columnInPKandUQ="//@tables.0/@tablePK" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Subject">
+    <tablePK name="PK_Subject" PKandUQColumns="//@tables.1/@columns.0"/>
+    <columns name="subjectID" columnInPKandUQ="//@tables.1/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="subjectName" length="20" columnDataType="//@dataTypes.1"/>
+  </tables>
+  <tables name="TeachingStuff">
+    <tableFKs name="FK_TeachingStuff_Chair" rhsKey="//@tables.4/@tablePK" lhsAttr="//@tables.2/@columns.2 //@tables.2/@columns.3" refersTo="//@tables.4" inverseReferentialIntegrityCon="true"/>
+    <tablePK name="PK_TeachingStuff" PKandUQColumns="//@tables.2/@columns.0"/>
+    <columns name="teachingStuffID" columnInPKandUQ="//@tables.2/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="teachingStuffTitle" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="chairName" length="20" columnInFK="//@tables.2/@tableFKs.0" columnDataType="//@dataTypes.1"/>
+    <columns name="facultyID" columnInFK="//@tables.2/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Faculty">
+    <tablePK name="PK_Faculty" PKandUQColumns="//@tables.3/@columns.0"/>
+    <columns name="facultyID" columnInPKandUQ="//@tables.3/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="facultyName" length="20" columnDataType="//@dataTypes.1"/>
+  </tables>
+  <tables name="Chair">
+    <tableFKs name="FK_Chair_Faculty" rhsKey="//@tables.3/@tablePK" lhsAttr="//@tables.4/@columns.1" refersTo="//@tables.3"/>
+    <tablePK name="PK_Chair" PKandUQColumns="//@tables.4/@columns.1 //@tables.4/@columns.0"/>
+    <columns name="chairName" columnInPKandUQ="//@tables.4/@tablePK" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="facultyID" columnInPKandUQ="//@tables.4/@tablePK" columnInFK="//@tables.4/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="NonTeachingStuff">
+    <tablePK name="PK_NonTeachingStuff" PKandUQColumns="//@tables.5/@columns.0"/>
+    <columns name="nonTeachingStuffID" columnInPKandUQ="//@tables.5/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="nonTeachingStuffPosition" length="20" columnDataType="//@dataTypes.1"/>
+  </tables>
+  <tables name="Employee">
+    <tableFKs name="FK_Employee_NonTeachingStuff" rhsKey="//@tables.5/@tablePK" lhsAttr="//@tables.6/@columns.3" refersTo="//@tables.5"/>
+    <tableFKs name="FK_Employee_TeachingStuff" rhsKey="//@tables.2/@tablePK" lhsAttr="//@tables.6/@columns.4" refersTo="//@tables.2"/>
+    <tablePK name="PK_Employee" PKandUQColumns="//@tables.6/@columns.0"/>
+    <columns name="employeeID" columnInPKandUQ="//@tables.6/@tablePK" columnDataType="//@dataTypes.0"/>
+    <columns name="employeeName" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="employeeSurname" length="20" columnDataType="//@dataTypes.1"/>
+    <columns name="nonTeachingStuffID" columnInFK="//@tables.6/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="teachingStuffID" columnInFK="//@tables.6/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Teacher">
+    <tableFKs name="FK_Teacher_TeachingStuff" rhsKey="//@tables.2/@tablePK" lhsAttr="//@tables.7/@columns.0" refersTo="//@tables.2"/>
+    <tablePK name="PK_Teacher" PKandUQColumns="//@tables.7/@columns.0"/>
+    <columns name="teachingStuffID" columnInPKandUQ="//@tables.7/@tablePK" columnInFK="//@tables.7/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Asistant">
+    <tableFKs name="FK_Asistant_TeachingStuff" rhsKey="//@tables.2/@tablePK" lhsAttr="//@tables.8/@columns.0" refersTo="//@tables.2"/>
+    <tablePK name="PK_Asistant" PKandUQColumns="//@tables.8/@columns.0"/>
+    <columns name="teachingStuffID" columnInPKandUQ="//@tables.8/@tablePK" columnInFK="//@tables.8/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Takes">
+    <tableFKs name="FK_Takes_Student" rhsKey="//@tables.0/@tablePK" lhsAttr="//@tables.9/@columns.0 //@tables.9/@columns.1 //@tables.9/@columns.2" refersTo="//@tables.0"/>
+    <tableFKs name="FK_Takes_Subject" rhsKey="//@tables.1/@tablePK" lhsAttr="//@tables.9/@columns.3" refersTo="//@tables.1"/>
+    <tablePK name="PK_Takes" PKandUQColumns="//@tables.9/@columns.0 //@tables.9/@columns.1 //@tables.9/@columns.2 //@tables.9/@columns.3"/>
+    <columns name="studentYear" columnInPKandUQ="//@tables.9/@tablePK" columnInFK="//@tables.9/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="studentID" columnInPKandUQ="//@tables.9/@tablePK" columnInFK="//@tables.9/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="studentSurname" columnInPKandUQ="//@tables.9/@tablePK" length="20" columnInFK="//@tables.9/@tableFKs.0" columnDataType="//@dataTypes.1"/>
+    <columns name="subjectID" columnInPKandUQ="//@tables.9/@tablePK" columnInFK="//@tables.9/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="Passes">
+    <tableFKs name="FK_Passes_Subject" rhsKey="//@tables.1/@tablePK" lhsAttr="//@tables.10/@columns.2" refersTo="//@tables.1"/>
+    <tableFKs name="FK_Passes_Student" rhsKey="//@tables.0/@tablePK" lhsAttr="//@tables.10/@columns.3 //@tables.10/@columns.4 //@tables.10/@columns.5" refersTo="//@tables.0"/>
+    <tablePK name="PK_Passes" PKandUQColumns="//@tables.10/@columns.2 //@tables.10/@columns.3 //@tables.10/@columns.4 //@tables.10/@columns.5"/>
+    <columns name="grade" columnDataType="//@dataTypes.0"/>
+    <columns name="examDate" columnDataType="//@dataTypes.2"/>
+    <columns name="subjectID" columnInPKandUQ="//@tables.10/@tablePK" columnInFK="//@tables.10/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="studentYear" columnInPKandUQ="//@tables.10/@tablePK" columnInFK="//@tables.10/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+    <columns name="studentID" columnInPKandUQ="//@tables.10/@tablePK" columnInFK="//@tables.10/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+    <columns name="studentSurname" columnInPKandUQ="//@tables.10/@tablePK" length="20" columnInFK="//@tables.10/@tableFKs.1" columnDataType="//@dataTypes.1"/>
+  </tables>
+  <tables name="AssistsInLabs">
+    <tableFKs name="FK_AssistsInLabs_TeachingStuff" rhsKey="//@tables.2/@tablePK" lhsAttr="//@tables.11/@columns.0" refersTo="//@tables.2"/>
+    <tableFKs name="FK_AssistsInLabs_Subject" rhsKey="//@tables.1/@tablePK" lhsAttr="//@tables.11/@columns.1" refersTo="//@tables.1"/>
+    <tablePK name="PK_AssistsInLabs" PKandUQColumns="//@tables.11/@columns.0 //@tables.11/@columns.1"/>
+    <columns name="teachingStuffID" columnInPKandUQ="//@tables.11/@tablePK" columnInFK="//@tables.11/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="subjectID" columnInPKandUQ="//@tables.11/@tablePK" columnInFK="//@tables.11/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <tables name="TeachesClasses">
+    <tableFKs name="FK_TeachesClasses_TeachingStuff" rhsKey="//@tables.2/@tablePK" lhsAttr="//@tables.12/@columns.2" refersTo="//@tables.2"/>
+    <tableFKs name="FK_TeachesClasses_Subject" rhsKey="//@tables.1/@tablePK" lhsAttr="//@tables.12/@columns.3" refersTo="//@tables.1"/>
+    <tableFKs name="FK_TeachesClasses_Subject_TeachesLabs" rhsKey="//@tables.1/@tablePK" lhsAttr="//@tables.12/@columns.4" refersTo="//@tables.1"/>
+    <tablePK name="PK_TeachesClasses" PKandUQColumns="//@tables.12/@columns.2 //@tables.12/@columns.3"/>
+    <columns name="classDate" columnDataType="//@dataTypes.2"/>
+    <columns name="classTime" columnDataType="//@dataTypes.3"/>
+    <columns name="teachingStuffID" columnInPKandUQ="//@tables.12/@tablePK" columnInFK="//@tables.12/@tableFKs.0" columnDataType="//@dataTypes.0"/>
+    <columns name="subjectID" columnInPKandUQ="//@tables.12/@tablePK" columnInFK="//@tables.12/@tableFKs.1" columnDataType="//@dataTypes.0"/>
+    <columns name="subjectID_TeachesLabs" columnInFK="//@tables.12/@tableFKs.2" columnDataType="//@dataTypes.0"/>
+  </tables>
+  <dataTypes name="int"/>
+  <dataTypes name="varchar"/>
+  <dataTypes name="date"/>
+  <dataTypes name="time"/>
+</rm:Database>
