@@ -1,0 +1,408 @@
+module er2rdbms;
+-- @path RDBMS=/domij/model/rdbms.ecore
+-- @path ER=/domij/model/er.ecore
+create OUT : RDBMS from IN : ER;
+
+--------------------
+-- helper section --
+--------------------
+helper context ER!Key def: isPrimary() : Boolean =
+	ER!Entity.allInstances() -> collect(e | e.primaryKey) -> includes(self);
+
+--check whether a relationship is a gerund
+helper context ER!Relationship def: isGerund() : Boolean =
+	ER!Gerund.allInstances() -> collect(e | e.relationship) -> flatten() -> includes(self);
+
+--check if the cardinialities on all relationship ends are N
+helper context ER!Relationship def: areMaxCardinalitiesMany() : Boolean =
+	not (self.entities -> collect(e | e.max) -> includes(#one));
+
+--get connected entities for a relationship
+helper context ER!Relationship def: getConectedEntities() : Sequence(ER!EntityConcept) = 
+	self.entities -> collect(e | e.entity) -> flatten();
+
+--get primary key for an entity
+helper context ER!Entity def : getPrimaryKeyAttributes() : Sequence(ER!Attribute) = 
+	Sequence{} -> union(if self.primaryKey.oclIsUndefined() then Sequence{} else self.primaryKey.keyAttributes endif) 
+		-> union(self.getRegularEntitiesForWeak() -> collect(e | e.getPrimaryKeyAttributes())) 
+		-> union(self.getSupertypes() -> collect(e | e.getPrimaryKeyAttributes())) 
+		-> flatten() -> select(e | not e.oclIsUndefined()) -> flatten();
+
+--get primary key for a gerund
+helper context ER!Gerund def : getPrimaryKeyAttributes() : Sequence(ER!Attribute) = 
+	self.relationship.getConectedEntities() -> collect(e | e.getPrimaryKeyAttributes()) 
+		-> union(if self.relationship.primaryKey.oclIsUndefined() then Sequence{} else self.relationship.primaryKey.keyAttributes endif)
+		-> flatten() -> select(e | not e.oclIsUndefined()) -> flatten();
+
+--get connected keys for a relationship
+helper context ER!Relationship def: getConectedKeyAttributes() : Sequence(ER!Attribute) = 
+	self.getConectedEntities() -> collect(e | e.getPrimaryKeyAttributes()) -> flatten();
+
+--get connected keys for a relationship
+helper context ER!Relationship def: getConectedKeyAttributesSequence() : Sequence(ER!Attribute) = 
+	self.getConectedEntities() -> collect(e | e.getPrimaryKeyAttributes());
+
+--get all relationships with max cardinality 1 and with specified entity 
+helper context ER!EntityConcept def: getRelationshipsWithMaxOne() : Sequence(ER!Relationship) = 
+	ER!Relationship.allInstances() -> select(e | e.entities -> collect(e1 | e1.entity) 
+		-> includes(self) and e.entities -> collect(e1 | e1.max) -> includes(#one)) 
+		-> flatten();
+
+--for Mto1
+--get connected entities for an entity which side has max cardinality 1
+helper context ER!EntityConcept def: getConnectedRelationshipsForEntity() : Sequence(ER!Relationship) = 
+	 self.getRelationshipsWithMaxOne() -> select(e | e.entities 
+	 	-> select(e1 | e1.max = #one and e1.entity = self) -> size() <> 0) -> flatten();
+
+helper context ER!Relationship def: getConnectedRegularEntity() : ER!RegularEntity = 
+	 self.entities -> select(e1 | e1.entity <> self and e1.max = #many) 
+	 	-> first();
+
+--get parent of an attribute
+helper context ER!Attribute def: getParentConcept() : ER!EntityConcept =
+	ER!Entity.allInstances() -> select(e | e.entityAttributes-> includes(self)) -> 
+		union(ER!Relationship.allInstances() -> select(e | e.relationshipAttributes 
+		-> includes(self))) -> first();
+
+--get parent's key attributes
+helper context ER!Attribute def: getPKForAttribute() : ER!Key =
+	if self.getParentConcept().oclIsKindOf(ER!Relationship) then OclUndefined
+	else if self.getParentConcept().primaryKey.oclIsUndefined() then OclUndefined 
+		else
+			if self.getParentConcept().primaryKey.keyAttributes -> includes(self) then
+				self.getParentConcept().primaryKey
+			else OclUndefined
+			endif
+		endif
+	endif;
+
+--get all regular entities for a weak entity in ID relationship
+helper context ER!EntityConcept def: getRegularEntitiesForWeak() : Sequence(ER!EntityConcept) = 
+	 ER!IdentificationDependency.allInstances() -> select(e | e.weakEntity = self) 
+	 	-> collect(e | e.regularEntity.entity) -> flatten();
+
+--get all supertypes for an entity
+helper context ER!EntityConcept def: getSupertypes() : Sequence(ER!EntityConcept) =
+	ER!ISA.allInstances() ->  select(e | e.subtypes.includes(self)) 
+		-> collect(e | e.supertype.entity) -> flatten();
+
+--get all categories for an entity
+helper context ER!EntityConcept def: getCategoriesForEntity() : Sequence(ER!EntityConcept) = 
+	 ER!Categorisation.allInstances() -> select(e | e.categorisedEntity = self) 
+	 	-> collect(e | e.categorisationEntities.entities) -> flatten();
+
+helper context ER!Domain def: getDomainName() : String = 
+	 if self.primitiveDomain = #integer then 'int' 
+	 else if self.primitiveDomain = #string then 'varchar' 
+	 else if self.primitiveDomain = #real then 'decimal' 
+	 else if self.primitiveDomain = #date then 'date' 
+	 else if self.primitiveDomain = #time then 'time' 
+	 else if self.primitiveDomain = #boolean then 'boolean' 
+	 else 'varchar'
+	 endif endif  endif	 endif	 endif	 endif;
+
+--global variable for passing columns between rules
+helper def: cols : Sequence(RDBMS!Column) = Sequence{};
+------------------
+-- rule section --
+------------------
+
+
+-- transform an er diagram to a database
+rule Model2Database {
+	from 
+		m : ER!ERModel
+	to 
+		p : RDBMS!Database (
+			name <- m.name,
+			tables <- m.entities.union(m.relationships).union(m.gerunds),
+			dataTypes <- m.domains
+		)
+}
+
+-- transform types
+rule Domain2Type {
+	from 
+		d : ER!Domain
+	to 
+		t : RDBMS!SystemDataType (
+			name <- d.getDomainName()	
+		)
+}
+
+-- transform an entity to a table
+rule Entity2Table {
+	from 
+		e : ER!Entity
+	using {
+		ids : Sequence(ER!EntityConcept) = Sequence{};
+		keysCat : Sequence(ER!Attributes) = Sequence{};
+		newCls : Sequence(RDBMS!Column) = Sequence{};
+		isaIds : Sequence(ER!EntityConcept) = Sequence{};
+		newIsaCls : Sequence(RDBMS!Column) = Sequence{};
+		pkcolumns : Sequence(RDBMS!Column) = Sequence{};
+	}
+	to 
+		t : RDBMS!Table (
+			name <- e.name,
+			columns <- e.entityAttributes -> union(e.getConnectedRelationshipsForEntity() -> 
+				collect(e1 | e1.relationshipAttributes) -> flatten()),
+			tablePK <- e.primaryKey
+		)
+	do {
+		--Mto1
+		thisModule.cols <- Sequence{};
+		for (r in e.getConnectedRelationshipsForEntity()) {
+			t.tableFKs <- thisModule.CreateForeignKeys(r.getConnectedRegularEntity().entity, t, 
+				r.getConnectedRegularEntity().entity.getPrimaryKeyAttributes(),
+				r.getConnectedRegularEntity().min = #one, r.name);
+		}
+		
+		--Categorisation
+		keysCat <- e.getCategoriesForEntity();
+		thisModule.cols <- Sequence{};
+		for (reg in keysCat) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'cat');
+		}
+		
+		--ID
+		ids <- e.getRegularEntitiesForWeak();
+		thisModule.cols <- Sequence{};
+		for (reg in ids) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'ID');
+		}
+		pkcolumns <- pkcolumns -> append(thisModule.cols) -> flatten();
+		
+		
+		--ISA
+		isaIds <- e.getSupertypes();
+		thisModule.cols <- Sequence{};
+		for (reg in isaIds) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'ISA');
+		}
+		pkcolumns <- pkcolumns -> append(thisModule.cols) -> flatten();
+		
+		--set the right columns for PK
+		if (t.tablePK.oclIsUndefined()) {
+			t.tablePK <- thisModule.Key2PKMtoN(pkcolumns, t.name);
+		} else {
+			t.tablePK.PKandUQColumns <- pkcolumns;
+			for (pkc in pkcolumns) {
+				pkc.columnInPKandUQ <- t.tablePK;
+			}
+		}
+	}
+}
+
+-- no references to existing attributes exist
+-- each column is created for its table
+rule Attribute2Column {
+	from
+		a : ER!Attribute
+	to
+		c : RDBMS!Column (
+			name <- a.name,
+			columnInPKandUQ <- a.getPKForAttribute(),
+			columnDataType <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.domain else OclUndefined endif,
+			default <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.default else OclUndefined endif,
+			length <-if not a.attributeDomain.oclIsUndefined() then  a.attributeDomain.length else OclUndefined endif
+		)
+	do {
+	}
+}
+
+--key to primary constraint
+rule Key2PKConstraint {
+	from
+		k : ER!Key (k.isPrimary())
+	to 
+		pkc : RDBMS!PrimaryKeyCon (
+			name <- 'PK_' + (k.keyAttributes -> first()).getParentConcept().name,
+			PKandUQColumns <- k.keyAttributes
+		)
+}
+
+-- gerunds are transformed to tables
+rule Gerund2Entity {
+	from 
+		r : ER!Gerund 
+	using {
+		keys : Sequence(ER!Attributes) = Sequence{};
+		keysCat : Sequence(ER!Attributes) = Sequence{};
+		ids : Sequence(ER!EntityConcept) = Sequence{};
+		newCls : Sequence(RDBMS!Column) = Sequence{};
+		isaIds : Sequence(ER!EntityConcept) = Sequence{};
+		newIsaCls : Sequence(RDBMS!Column) = Sequence{};
+		pkcolumns : Sequence(RDBMS!Column) = Sequence{};
+	}
+	to 
+		t : RDBMS!Table (
+			name <- r.relationship.name,
+			columns <- r.relationship.relationshipAttributes -> union(r.getConnectedRelationshipsForEntity() -> 
+				collect(e1 | e1.relationshipAttributes) -> flatten())
+		)
+	do {
+		--MtoN
+		keys <- r.relationship.getConectedKeyAttributesSequence();
+		thisModule.cols <- Sequence{};
+		for (k in keys) {
+			t.tableFKs <- thisModule.CreateForeignKeys(k -> first() -> getParentConcept(), t, k, false, r.relationship.name); 		
+		}
+		pkcolumns <- pkcolumns -> append(thisModule.cols) -> flatten();
+		
+		--Mto1
+		thisModule.cols <- Sequence{};
+		for (r1 in r.getConnectedRelationshipsForEntity()) {	
+			t.tableFKs <- thisModule.CreateForeignKeys(r1.getConnectedRegularEntity().entity, t, 
+				r1.getConnectedRegularEntity().entity.getPrimaryKeyAttributes(),
+				r1.getConnectedRegularEntity().min = #one, r1.name);
+		}
+		
+		--Categorisation
+		keysCat <- r.getCategoriesForEntity();
+		thisModule.cols <- Sequence{};
+		for (reg in keysCat) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'cat');
+		}
+		
+		--ID
+		ids <- r.getRegularEntitiesForWeak();
+		thisModule.cols <- Sequence{};
+		for (reg in ids) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'ID');
+		}
+		pkcolumns <- pkcolumns -> append(thisModule.cols) -> flatten();
+		
+		
+		--ISA
+		isaIds <- r.getSupertypes();
+		thisModule.cols <- Sequence{};
+		for (reg in isaIds) {
+			t.tableFKs <- thisModule.CreateForeignKeys(reg, t, reg.getPrimaryKeyAttributes(), false, 'ISA');
+		}
+		pkcolumns <- pkcolumns -> append(thisModule.cols) -> flatten();
+		
+		--set the right columns for PK
+		if (t.tablePK.oclIsUndefined()) {
+			t.tablePK <- thisModule.Key2PKMtoN(pkcolumns, t.name);
+		} else {
+			t.tablePK.PKandUQColumns <- pkcolumns;
+			for (pkc in pkcolumns) {
+				pkc.columnInPKandUQ <- t.tablePK;
+			}
+		}
+	}
+}
+
+--relationship to table (M:N cardinalities)
+rule Relationship2Table {
+	from
+		r : ER!Relationship (not r.isGerund() and r.areMaxCardinalitiesMany())  
+	using {
+		keys : Sequence(ER!Attributes) = Sequence{};
+		pks : Sequence(ER!Key) = Sequence{};
+	}		
+	to 
+		t : RDBMS!Table (
+			name <- r.name,
+			columns <- r.relationshipAttributes
+		)
+	do {
+		keys <- r.getConectedKeyAttributesSequence();
+		thisModule.cols <- Sequence{};
+		for (k in keys) {
+			pks <- pks.append(k -> first() -> getPKForAttribute());
+			t.tableFKs <- thisModule.CreateForeignKeys(k -> first() -> getParentConcept(), t, k, false, k -> first() -> getParentConcept().name);
+		}
+		t.tablePK <- thisModule.Key2PKMtoN(thisModule.cols, t.name);		
+	}
+}
+
+--create FKs in tables
+rule CreateForeignKeys(e : ER!EntityConcept, t : RDBMS!Table, 
+					   columns : Sequence(ER!Attribute), irc : Boolean, relName : String) {	
+	using {
+		keys : Sequence(RDBMS!Column) = Sequence{};
+		name : String = '';
+	}
+	to 
+		fk : RDBMS!ForeignKey (
+			refersTo <- e,
+			FKTable <- t,
+			inverseReferentialIntegrityCon <- irc,
+			rhsKey <- e.primaryKey
+		)
+	do {
+		
+		if (e.primaryKey.oclIsUndefined()) {
+			fk.rhsKey <- thisModule.resolveTemp(e, 't').tablePK;
+		}		
+		
+		--fk.rhsKey <- t.tablePK;
+		keys <- columns -> collect(e | thisModule.Attribute2ColumnFK(e, fk, relName));
+		t.columns <- keys;
+		fk.lhsAttr <- keys;
+		thisModule.cols <- thisModule.cols.append(keys) -> flatten();
+		name <- 'FK_' + t.name + '_' + if e.oclIsKindOf(ER!Gerund) then e.relationship.name else e.name endif;
+		if (t.tableFKs -> collect(e1 | e1.name) -> flatten() -> includes(name)) {
+			fk.name <- name + '_' + relName;
+		} else {
+			fk.name <- name;
+		}
+		fk;
+	}
+}
+
+--create attributes for FKs
+rule Attribute2ColumnFK(a : ER!Attribute, fk : RDBMS!ForeignKey, relName : String) {
+	to
+		cm : RDBMS!Column (
+			nullable <- false,
+			columnInFK <- fk,
+			columnDataType <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.domain else OclUndefined endif,
+			default <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.default else OclUndefined endif,
+			length <-if not a.attributeDomain.oclIsUndefined() then  a.attributeDomain.length else OclUndefined endif
+		)
+	do {
+		if (fk.FKTable.columns -> collect(e | e.name) -> flatten() -> includes(a.name) or fk.FKTable = fk.refersTo) {
+			cm.name <- a.name + '_' + relName;
+		} else {
+			cm.name <- a.name;
+		}
+		cm;
+	}
+}
+
+
+
+--create attributes for PKs
+rule Attribute2ColumnPKWeak(a : ER!Attribute, pk : RDBMS!PrimaryKeyCon) {
+	to
+		cm : RDBMS!Column (
+			name <- a.name,
+			nullable <- false,
+			columnInPKandUQ <- pk,
+			columnDataType <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.domain else OclUndefined endif,
+			default <- if not a.attributeDomain.oclIsUndefined() then a.attributeDomain.default else OclUndefined endif,
+			length <-if not a.attributeDomain.oclIsUndefined() then  a.attributeDomain.length else OclUndefined endif
+		)
+	do {
+		cm;
+	}
+}
+
+--create PK for relationship entites
+rule Key2PKMtoN(k : Sequence(RDBMS!Column), tableName : String) {
+
+	to
+		c : RDBMS!PrimaryKeyCon (
+			name <- 'PK_' + tableName,
+			PKandUQColumns <- k
+		)
+	do {
+		for (e in k) {
+			e.columnInPKandUQ <- c;
+		}
+		c;
+	}
+}

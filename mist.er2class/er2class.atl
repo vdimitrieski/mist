@@ -1,0 +1,362 @@
+module er2class;
+--@path Class=/domij/model/classDiagram.ecore
+--@path ER=/domij/model/er.ecore
+create OUT : Class from IN : ER;
+
+--------------------
+-- helper section --
+--------------------
+
+--as we don't have reverse connection from a gerund to a relationship we must
+--iterate through all relationships and find if one points to this gerund
+helper context ER!Relationship def: isGerund() : Boolean =
+	ER!Gerund.allInstances() -> collect(e | e.relationship) -> flatten() -> includes(self);
+
+--check if the cardinialities on all relationship ends are N
+helper context ER!Relationship def: areMaxCardinalitiesMany() : Boolean =
+	not (self.entities -> collect(e | e.max) -> includes(#one));
+
+--get all supertypes for an entity
+helper context ER!Entity def: getSupertypes() : Sequence(ER!EntityConcept) =
+	ER!ISA.allInstances() ->  select(e | e.subtypes.includes(self)) -> collect(e | e.supertype.entity);
+
+--get all subtypes for an entity
+helper context ER!Entity def: getSubtypes() : Sequence(ER!Entity) =
+	ER!ISA.allInstances() ->  select(e | e.supertype.entity = self) -> collect(e | e.subtypes);
+
+--get keys' attributes from supertype (as they are inherited)
+helper context ER!Entity def: getAttributesFromSupertypes() : Sequence(ER!Attribute) =
+	self.getSupertypes()->collect(e | e.keySet -> collect(e1 | e1.keyAttributes)) -> flatten();
+
+--get parent of an attribute
+helper context ER!Attribute def: getParentConcept() : Sequence(ER!EntityConcept) =
+	ER!Entity.allInstances() -> select(e | e.entityAttributes-> includes(self)) -> 
+		union(ER!Relationship.allInstances() -> select(e | e.relationshipAttributes -> includes(self)));
+
+--get parent's key attributes
+helper context ER!Attribute def: getParentConceptKeyAttributes() : Sequence(ER!EntityConcept) =
+	self.getParentConcept() -> collect(e | if e.oclIsKindOf(ER!Relationship) then Sequence{} else e.keySet -> collect(e1 | e1.keyAttributes) endif) -> flatten(); 
+
+--check for an access modifier type
+helper context ER!Attribute def: getAccessModifier() : Class!AccessModifier = 
+	if self.getParentConceptKeyAttributes() -> includes(self) then #protected else #private endif;
+
+--get connected entities for a relationship
+helper context ER!Relationship def: getConectedEntities() : Sequence(ER!EntityConcept) = 
+	self.entities -> collect(e | e.entity) -> flatten();
+
+--get all relationships with max cardinality 1 and with specified entity 
+helper context ER!EntityConcept def: getRelationshipsWithMaxOne() : Sequence(ER!Relationship) = 
+	ER!Relationship.allInstances() -> select(e | e.entities -> collect(e1 | e1.entity) 
+		-> includes(self) and e.entities -> collect(e1 | e1.max) -> includes(#one)) 
+		-> flatten();
+
+--get connected entities for an entity which side has max cardinality 1
+helper context ER!EntityConcept def: getConnectedEntitiesForEntity() : Sequence(ER!EntityConcept) = 
+	 self.getRelationshipsWithMaxOne() -> collect(e | e.entities 
+	 	-> select(e1 | e1.entity <> self and e1.max = #many) 
+	 	-> collect(e3 | e3.entity)) -> flatten();
+
+--get recursively connected entities for an entity which side has max cardinality 1
+helper context ER!EntityConcept def: getRecursiveEntitiesForEntity() : Sequence(ER!EntityConcept) = 
+	 self.getRelationshipsWithMaxOne() -> select(e|e.entities->forAll(e1 | e1.entity = self)) 
+	 	-> collect(e | e.entities -> select(e1 | e1.max = #many) 
+	 	-> collect(e3 | e3.entity)) -> flatten();
+
+--get connected attributes for an entity which side has max cardinality 1
+helper context ER!EntityConcept def: getConnectedAttributesForEntity() : Sequence(ER!Attributes) = 
+	 self.getRelationshipsWithMaxOne() -> select(e | e.entities 
+	 	-> select(e1 | e1.entity <> self and e1.max = #many) 
+	 	-> collect(e3 | e3.entity) -> size() <> 0) -> collect(e | e.relationshipAttributes) 
+		-> flatten();
+
+--get all regular entities for a weak entity in ID relationship
+helper context ER!EntityConcept def: getRegularEntitiesForWeak() : Sequence(ER!EntityConcept) = 
+	 ER!IdentificationDependency.allInstances() -> select(e | e.weakEntity = self) 
+	 	-> collect(e | e.regularEntity.entity) -> flatten();
+		
+--get all categories for an entity
+helper context ER!EntityConcept def: getCategoriesForEntity() : Sequence(ER!EntityConcept) = 
+	 ER!Categorisation.allInstances() -> select(e | e.categorisedEntity = self) 
+	 	-> collect(e | e.categorisationEntities.entities) -> flatten();	
+
+helper context ER!Domain def: getDomainName() : String = 
+	 if self.primitiveDomain = #integer then 'int' 
+	 else if self.primitiveDomain = #string then 'String' 
+	 else if self.primitiveDomain = #real then 'double' 
+	 else if self.primitiveDomain = #date then 'java.util.Date' 
+	 else if self.primitiveDomain = #time then 'java.util.Date' 
+	 else if self.primitiveDomain = #boolean then 'boolean' 
+	 else 'String'
+	 endif endif  endif	 endif	 endif	 endif;
+
+
+helper context String def: firstLetterToUpper() : String =
+	self.substring(1, 1).toUpper()  + self.substring(2, self.size());
+
+helper def: voidDataType : Class!ELementType = OclUndefined;
+
+
+helper def: generateConstructorBody(attrs : Sequence(String)) : Sequence(String) = 
+	attrs -> collect(a | 'this.' + a + ' = ' + a + ';\n') -> flatten(); 
+
+helper def: generateGetBody(a : String) : String = 
+	'return this.' + a + ';\n'; 
+	
+helper def: generateSetBody(a : String) : String = 
+	'this.' + a + ' = ' + a + ';\n'; 
+
+------------------
+-- rule section --
+------------------
+
+-- transform an er model to a class model
+rule Model2Model {
+	from 
+		mer : ER!ERModel
+	to 
+		mcl : Class!ClassModel (
+			packages <- p,
+			types <- mer.domains
+		),
+		p : Class!Package (
+			name <- mer.name,
+			elements <- mer.entities.union(mer.relationships).union(mer.gerunds)
+		),
+		dt : Class!Type (
+			name <- 'void'	
+		),
+		edt : Class!ElementType (
+			type <- dt	
+		)
+	do {
+		thisModule.voidDataType <- edt;
+		mcl.types <- dt;
+	}
+}
+
+-- transform types
+rule Domain2Type {
+	from 
+		d : ER!Domain
+	to 
+		t : Class!Type (
+			name <- d.getDomainName()	
+		)
+}
+
+-- transform an entity to a class
+-- attributes are directly created for each attribute in an entity
+-- aditional attributes come from M:N relationships, ID relationships, and categorisations
+-- supertypes and subtypes are directly trasnformed form ISA relationship
+rule Entity2Class {
+	from 
+		e : ER!Entity
+	to 
+		c : Class!Class (
+			name <- e.name.firstLetterToUpper(),
+			accessModifier <- #public,
+			supertypes <- e.getSupertypes(),
+			subtypes <- e.getSubtypes(),
+			fields <- (e.entityAttributes -> collect(attr | thisModule.Attribute2Attribute(attr))).			
+				union(e.getConnectedAttributesForEntity() -> collect(e1 | thisModule.Attribute2Attribute(e1))).
+				union(e.getConnectedEntitiesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(e.getRecursiveEntitiesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(e.getRegularEntitiesForWeak() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(e.getCategoriesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))),
+			methods <-  Sequence{} -> append(thisModule.CreateConstructor(c.fields, c.name)).
+				union(e.entityAttributes -> collect(attr | Sequence{} -> append(thisModule.Attribute2GetMethod(attr)) -> append(thisModule.Attribute2SetMethod(attr)) -> flatten())).
+				union(e.getConnectedAttributesForEntity() -> collect(attr | Sequence{} -> append(thisModule.Attribute2GetMethod(attr)) -> append(thisModule.Attribute2SetMethod(attr)) -> flatten())).
+				union(e.getConnectedEntitiesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(e.getRecursiveEntitiesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(e.getRegularEntitiesForWeak() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(e.getCategoriesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten()))				
+		)
+}
+
+-- each attribute should be created only when it is needed
+-- no references to existing attributes exist
+-- each attribute is created for its class
+lazy rule Attribute2Attribute {
+	from
+		aer : ER!Attribute
+	to
+		acl : Class!Attribute (
+			name <- aer.name,
+			accessModifier <- aer.getAccessModifier(),
+			type <- if not aer.attributeDomain.oclIsUndefined() then thisModule.CreateElementType(aer.attributeDomain.domain) else OclUndefined endif
+		)
+		
+}
+
+--create get method from an attribute
+lazy rule Attribute2GetMethod {
+	from
+		a : ER!Attribute
+	to
+		gf : Class!Method (
+			name <- 'get' + a.name.toString().firstLetterToUpper(),
+			accessModifier <- #public,
+			returnType <- if not a.attributeDomain.oclIsUndefined() then thisModule.CreateElementType(a.attributeDomain.domain) else OclUndefined endif,
+			body <- thisModule.generateGetBody(a.name)
+		)
+}
+
+--create get method from an attribute
+lazy rule Attribute2SetMethod {
+	from
+		a : ER!Attribute
+	to
+		sf : Class!Method (
+			name <- 'set' + a.name.toString().firstLetterToUpper(),
+			accessModifier <- #public,
+			returnType <- thisModule.voidDataType,
+			parameters <- thisModule.Attribute2Attribute(a),
+			body <- thisModule.generateSetBody(a.name)
+		)
+		
+}
+
+-- gerunds are transformed to classes
+rule Gerund2Class {
+	from 
+		r : ER!Gerund 
+	to
+		e : Class!Class (
+			name <- r.relationship.name.firstLetterToUpper(),
+			fields <- (r.relationship.getConectedEntities() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name.toString()))).
+				union(r.relationship.relationshipAttributes -> collect(attr | thisModule.Attribute2Attribute(attr))).
+				union(r.getConnectedAttributesForEntity() -> collect(e1 | thisModule.Attribute2Attribute(e1))).
+				union(r.getConnectedEntitiesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(r.getRecursiveEntitiesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(r.getRegularEntitiesForWeak() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))).
+				union(r.getCategoriesForEntity() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name))),
+			methods <-  Sequence{} -> append(thisModule.CreateConstructor(e.fields, e.name)).
+				union(r.relationship.relationshipAttributes -> collect(attr | Sequence{} -> append(thisModule.Attribute2GetMethod(attr)) -> append(thisModule.Attribute2SetMethod(attr)) -> flatten())).
+				union(r.getConnectedAttributesForEntity() -> collect(attr | Sequence{} -> append(thisModule.Attribute2GetMethod(attr)) -> append(thisModule.Attribute2SetMethod(attr)) -> flatten())).
+				union(r.relationship.getConectedEntities() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(r.getConnectedEntitiesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(r.getRecursiveEntitiesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(r.getRegularEntitiesForWeak() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten())).
+				union(r.getCategoriesForEntity() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten()))
+		)
+}
+
+-- M:N relationships are transformed to classes
+-- only relationships that are not gerunds are transformed
+rule Relationship2ClassManyCardinalities {
+	from 
+		r : ER!Relationship (not r.isGerund() and r.areMaxCardinalitiesMany())
+	to
+		e : Class!Class (
+			name <- r.name.firstLetterToUpper(),
+			fields <- (r.getConectedEntities() -> collect(e1 | thisModule.CreateClassAttribute(e1, e1.name.toString()))).
+				union(r.relationshipAttributes -> collect(attr | thisModule.Attribute2Attribute(attr))),
+			methods <- Sequence{} -> append(thisModule.CreateConstructor(e.fields, e.name)).
+				union(r.relationshipAttributes -> collect(attr | Sequence{} -> append(thisModule.Attribute2GetMethod(attr)) -> append(thisModule.Attribute2SetMethod(attr)) -> flatten())).
+				union(r.getConectedEntities() -> collect(e1 | Sequence{} -> append(thisModule.CreateClassAttributeGetMethod(e1, e1.name)) -> append(thisModule.CreateClassAttributeSetMethod(e1, e1.name)) -> flatten()))
+		)
+}
+
+--called rule for creating attributes from entities in cases of N:1 references etc.
+rule CreateClassAttribute(ent : ER!EntityConcept, attrName : String) {
+	to
+		attr : Class!Attribute (
+			name <- attrName.toString().toLower(),
+			type <- thisModule.CreateComplexElementType(ent),
+			accessModifier <- #protected
+		) 
+	do {
+		attr;
+	}
+}
+
+--called rule for creating attributes from entities in cases of N:1 references etc.
+rule CreateElementType(domain : ER!Domain) {
+	to
+		attr : Class!ElementType (
+			type <- domain
+		) 
+	do {
+		attr;
+	}
+}
+
+--called rule for creating attributes from entities in cases of N:1 references etc.
+rule CreateComplexElementType(ent : ER!EntityConcept) {
+	to
+		attr : Class!ElementType (
+			type <- ent
+		) 
+	do {
+		attr;
+	}
+}
+
+--create get method from an attribute.
+rule CreateClassAttributeGetMethod(ent : ER!EntityConcept, attrName : String) {
+	using {
+		bodyTemp : String = '';
+	}
+	to 
+		gf : Class!Method (
+			name <- 'get' + attrName.firstLetterToUpper(),
+			accessModifier <- #public,
+			returnType <- thisModule.CreateComplexElementType(ent),
+			parameters <- thisModule.CreateClassAttribute(ent, attrName),
+			body <- thisModule.generateGetBody(attrName)
+		)
+	do {
+		gf;
+	}
+}
+
+--create get method from an attribute.
+rule CreateClassAttributeSetMethod(ent : ER!EntityConcept, attrName : String) {
+	to 
+		gf : Class!Method (
+			name <- 'set' + attrName.firstLetterToUpper(),
+			accessModifier <- #public,
+			returnType <- thisModule.voidDataType,
+			parameters <- thisModule.CreateClassAttribute(ent, attrName),
+			body <- thisModule.generateSetBody(attrName)
+		)
+	do {
+		gf;
+	}
+}
+
+--create get method from an attribute.
+rule CreateConstructor(attrs : Sequence(Class!Attribute), className : String) {
+	using {
+		bodyTemp : String = '';
+	}
+	to 
+		const : Class!Method (
+			name <- className,
+			accessModifier <- #public,
+			parameters <- attrs -> collect(a | thisModule.CopyAttribute(a))
+		)
+	do {
+		for (s in thisModule.generateConstructorBody(const.parameters->collect(a | a.name))) {
+			bodyTemp <- bodyTemp.concat(s);
+		}
+		const.body <- bodyTemp;
+		const;
+	}
+}
+
+--create copy of an attribute to represent a parameter.
+rule CopyAttribute(attr : Class!Attribute) {
+	to 
+		atr : Class!Attribute (
+			name <- attr.name,
+			accessModifier <- attr.accessModifier,
+			type <- attr.type
+		)
+	do {
+		atr;
+	}
+}
+
+--rename. f.e. teaches class -> subject x2
